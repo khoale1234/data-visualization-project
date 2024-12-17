@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title></title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+  <script src="script.js" defer></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <style>
+     body, html {
+            height: 100%;
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+        header {
+      background-color: #007bff;
+      color: white;
+      text-align: center;
+      padding: 15px 0;
+      font-size: 24px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+        .info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+            max-width: 400px;
+        }
+        input[type="text"] {
+            padding: 10px;
+            width: 180px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-right: 10px; /* Thêm khoảng trống bên phải */
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #007bff;
+            border: none;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .legend {
+            position: absolute;
+            bottom: 30px;
+            left: 10px;
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+        .legend div {
+            display: flex;
+            align-items: center;
+        }
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            margin-right: 5px;
+        }
+    .bar {
+      fill: steelblue;
+      cursor: pointer;
+    }
+    .bar:hover {
+      fill: orange;
+    }
+    .axis-label {
+      font-size: 14px;
+    }
+    .title {
+      font-size: 24px;
+      text-anchor: middle;
+    }
+    .chart-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .controls {
+      margin: 10px;
+    }
+    .tooltip {
+      position: absolute;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      padding: 5px 10px;
+      border-radius: 5px;
+      pointer-events: none;
+      font-size: 14px;
+      text-align: center;
+      z-index: 10;
+      display: none;
+    }
+    svg {
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    🌪️ Typhoon Data Visualization Dashboard 🌊
+  </header>
+  
+  <div class="info">
+    <h1>Tìm kiếm cơn bão theo ID</h1>
+    <input type="text" id="typhoonId" placeholder="Nhập ID cơn bão" />
+    <button onclick="searchTyphoon()">Tìm kiếm</button>
+    <div id="typhoonInfo"></div>
+    <div id="typhoonDates"></div>
+  </div>
+  
+  <div id="map"></div>
+  
+  <div class="legend">
+    <h4>Chú thích cấp độ bão</h4>
+    <div><div class="legend-color" style="background: green;"></div> Tropical Depression</div>
+    <div><div class="legend-color" style="background: orange;"></div> Tropical Cyclone of TS intensity or higher</div>
+    <div><div class="legend-color" style="background: red;"></div> Typhoon</div>
+    <div><div class="legend-color" style="background: blue;"></div> Severe Tropical Storm</div>
+    <div><div class="legend-color" style="background: yellow;"></div> Tropical Storm</div>
+    <div><div class="legend-color" style="background: purple;"></div> Extra-tropical Cyclone</div>
+    <div><div class="legend-color" style="background: gray;"></div> RSMC Tokyo-Typhoon</div>
+  </div>
+  
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    let typhoonData = [];
+  
+    // Tải dữ liệu từ file JSON
+    fetch('typhoonData.json')
+        .then(response => response.json())
+        .then(data => {
+            typhoonData = data;
+        })
+        .catch(error => console.error('Error loading the JSON data:', error));
+  
+    const map = L.map('map').setView([20, 120], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+    }).addTo(map);
+  
+    function searchTyphoon() {
+        const id = document.getElementById('typhoonId').value;
+        const typhoons = typhoonData.filter(t => t["International number ID"] == id);
+  
+        // Xóa các đối tượng trên bản đồ trước đó
+        map.eachLayer(layer => {
+            if (layer instanceof L.Marker || layer instanceof L.Polyline || layer instanceof L.Circle) {
+                map.removeLayer(layer);
+            }
+        });
+  
+        if (typhoons.length > 0) {
+            // Lấy tọa độ của cơn bão
+            const path = typhoons.map(t => {
+                let lat = t["Latitude of the center"] / 10; 
+                let lng = t["Longitude of the center"] / 10; 
+                return [lat, lng];
+            });
+  
+            // Vẽ đường đi của cơn bão
+            const polyline = L.polyline(path, { color: 'blue', weight: 4 }).addTo(map);
+            map.fitBounds(polyline.getBounds());
+  
+            // Vẽ vòng ảnh hưởng và hiển thị điểm với màu sắc khác nhau theo cấp độ
+            typhoons.forEach(t => {
+                const color = getColorByGrade(t.grade);
+                L.circle([t["Latitude of the center"] / 10, t["Longitude of the center"] / 10], {
+                    radius: 50000, 
+                    color: color,
+                    fillOpacity: 0.5
+                }).addTo(map);
+  
+                // Đánh dấu vị trí cơn bão
+                L.marker([t["Latitude of the center"] / 10, t["Longitude of the center"] / 10]).addTo(map)
+                    .bindPopup(`Cơn bão ID: ${t["International number ID"]}<br>Ngàу: ${t.year}-${t.month}-${t.day}<br>Giờ: ${t.hour}:00<br>Cấp độ: ${t.grade}<br>Áp suất: ${t["Central pressure"]} hPa`)
+                    .openPopup();
+            });
+  
+            // Hiển thị ngày bắt đầu và ngày kết thúc
+            const startDate = typhoons[0].year + '-' + String(typhoons[0].month).padStart(2, '0') + '-' + String(typhoons[0].day).padStart(2, '0');
+            const endDate = typhoons[typhoons.length - 1].year + '-' + String(typhoons[typhoons.length - 1].month).padStart(2, '0') + '-' + String(typhoons[typhoons.length - 1].day).padStart(2, '0');
+  
+            document.getElementById('typhoonDates').innerHTML = `
+                <p>Ngày bắt đầu: ${startDate}</p>
+                <p>Ngày kết thúc: ${endDate}</p>
+            `;
+        } else {
+            alert('Không tìm thấy cơn bão với ID đã nhập.');
+        }
+    }
+  
+    function getColorByGrade(grade) {
+        switch (grade) {
+            case "Tropical Depression": return "green";
+            case "Tropical Cyclone of TS intensity or higher": return "orange";
+            case "Severe Tropical Storm": return "blue";
+            case "Tropical Storm": return "yellow";
+            case "Typhoon": return "red";
+            case "Extra-tropical Cyclone": return "purple";
+            case "RSMC Tokyo-Typhoon": return "gray";
+            default: return "gray";
+        }
+    }
+  </script>
+  <canvas id="lineChart"></canvas>
+
+
+<div class="chart-container">
+  <h2 class="title">Typhoon Counts by Decade</h2>
+  <div class="controls">
+    <button id="sort-original">Sort by Original Order</button>
+    <button id="sort-ascending">Sort Ascending</button>
+    <button id="sort-descending">Sort Descending</button>
+  </div>
+  <svg id="main-chart" width="800" height="400"></svg>
+  <h2 class="title" id="sub-title" style="display: none;">Typhoon Counts by Year</h2>
+  <svg id="details-chart" width="800" height="400"></svg>
+</div>
+
+<div class="tooltip"></div>
+
+<script>
+  d3.csv('typhoon_data.csv').then(function(data) {
+    data.forEach(d => {
+      d.year = +d.year;
+      d.decade = Math.floor(d.year / 10) * 10;
+    });
+
+    const margin = { top: 40, right: 30, bottom: 60, left: 60 };
+    const width = 800 - margin.left - margin.right;
+    const height = 400 - margin.top - margin.bottom;
+
+    const svg = d3.select('#main-chart')
+      .append('g')
+      .attr('transform', `translate(${margin.left},${margin.top})`);
+
+    const tooltip = d3.select('.tooltip');
+    let chartData = [];
+
+    const x = d3.scaleBand()
+      .range([0, width])
+      .padding(0.1);
+
+    const y = d3.scaleLinear()
+      .range([height, 0]);
+
+    const colorScale = d3.scaleLinear()
+      .range(['steelblue', 'darkred']);
+
+    function updateChart(sortBy = 'original') {
+      const groupedData = d3.rollup(
+        data,
+        v => new Set(v.map(d => d['International number ID'])).size,
+        d => d.decade
+      );
+
+      chartData = Array.from(groupedData, ([key, count]) => ({
+        key: +key,
+        count: +count
+      }));
+
+      if (sortBy === 'ascending') {
+        chartData.sort((a, b) => a.count - b.count);
+      } else if (sortBy === 'descending') {
+        chartData.sort((a, b) => b.count - a.count);
+      } else {
+        chartData.sort((a, b) => a.key - b.key);
+      }
+
+      x.domain(chartData.map(d => d.key));
+      y.domain([0, d3.max(chartData, d => d.count)]);
+      colorScale.domain([0, d3.max(chartData, d => d.count)]);
+
+      svg.selectAll('.bar')
+        .data(chartData, d => d.key)
+        .join(
+          enter => enter.append('rect')
+            .attr('class', 'bar')
+            .attr('x', d => x(d.key))
+            .attr('y', height)
+            .attr('width', x.bandwidth())
+            .attr('height', 0)
+            .attr('fill', d => colorScale(d.count))
+            .on('mouseover', (event, d) => {
+              tooltip.style('display', 'block')
+                .html(`Decade: ${d.key}s<br>Typhoon Count: ${d.count}`);
+            })
+            .on('mousemove', (event) => {
+              tooltip.style('top', `${event.pageY - 40}px`)
+                .style('left', `${event.pageX + 10}px`);
+            })
+            .on('mouseout', () => tooltip.style('display', 'none'))
+            .on('click', (event, d) => showDetails(d.key))
+            .transition().duration(1000)
+            .attr('y', d => y(d.count))
+            .attr('height', d => height - y(d.count)),
+          update => update.transition().duration(1000)
+            .attr('x', d => x(d.key))
+            .attr('y', d => y(d.count))
+            .attr('width', x.bandwidth())
+            .attr('height', d => height - y(d.count))
+            .attr('fill', d => colorScale(d.count)),
+          exit => exit.transition().duration(1000)
+            .attr('y', height)
+            .attr('height', 0)
+            .remove()
+        );
+
+      svg.selectAll('.x-axis').remove();
+      svg.selectAll('.y-axis').remove();
+
+      svg.append('g')
+        .attr('class', 'x-axis')
+        .attr('transform', `translate(0,${height})`)
+        .call(d3.axisBottom(x).tickFormat(d => `${d}s`))
+        .append('text')
+        .attr('class', 'axis-label')
+        .attr('x', width / 2)
+        .attr('y', 40)
+        .attr('fill', 'black')
+        .style('text-anchor', 'middle')
+        .text('Decade');
+
+      svg.append('g')
+        .attr('class', 'y-axis')
+        .call(d3.axisLeft(y).ticks(10))
+        .append('text')
+        .attr('class', 'axis-label')
+        .attr('x', -height / 2)
+        .attr('y', -40)
+        .attr('transform', 'rotate(-90)')
+        .attr('fill', 'black')
+        .style('text-anchor', 'middle')
+        .text('Typhoon Count');
+    }
+
+    function showDetails(decade) {
+      const filteredData = data.filter(d => d.decade === decade);
+
+      const yearCounts = d3.rollup(
+        filteredData,
+        v => new Set(v.map(d => d['International number ID'])).size,
+        d => d.year
+      );
+
+      const yearData = Array.from(yearCounts, ([year, count]) => ({
+        year: +year,
+        count: +count
+      }));
+
+      const xYear = d3.scaleBand()
+        .domain(yearData.map(d => d.year))
+        .range([0, width])
+        .padding(0.1);
+
+      const yYear = d3.scaleLinear()
+        .domain([0, d3.max(yearData, d => d.count)])
+        .nice()
+        .range([height, 0]);
+
+      const svgDetails = d3.select('#details-chart')
+        .html('')
+        .append('g')
+        .attr('transform', `translate(${margin.left},${margin.top})`);
+
+      svgDetails.selectAll('.bar')
+        .data(yearData)
+        .join(
+          enter => enter.append('rect')
+            .attr('class', 'bar')
+            .attr('x', d => xYear(d.year))
+            .attr('y', height)
+            .attr('width', xYear.bandwidth())
+            .attr('height', 0)
+            .attr('fill', 'steelblue')
+            .on('mouseover', (event, d) => {
+              tooltip.style('display', 'block')
+                .html(`Year: ${d.year}<br>Typhoon Count: ${d.count}`);
+            })
+            .on('mousemove', (event) => {
+              tooltip.style('top', `${event.pageY - 40}px`)
+                .style('left', `${event.pageX + 10}px`);
+            })
+            .on('mouseout', () => tooltip.style('display', 'none'))
+            .transition().duration(1000)
+            .attr('y', d => yYear(d.count))
+            .attr('height', d => height - yYear(d.count)),
+          update => update.transition().duration(1000)
+            .attr('x', d => xYear(d.year))
+            .attr('y', d => yYear(d.count))
+            .attr('width', xYear.bandwidth())
+            .attr('height', d => height - yYear(d.count)),
+          exit => exit.transition().duration(1000)
+            .attr('y', height)
+            .attr('height', 0)
+            .remove()
+        );
+
+      svgDetails.append('g')
+        .attr('class', 'x-axis')
+        .attr('transform', `translate(0,${height})`)
+        .call(d3.axisBottom(xYear))
+        .append('text')
+        .attr('class', 'axis-label')
+        .attr('x', width / 2)
+        .attr('y', 40)
+        .attr('fill', 'black')
+        .style('text-anchor', 'middle')
+        .text('Year');
+
+      svgDetails.append('g')
+        .attr('class', 'y-axis')
+        .call(d3.axisLeft(yYear).ticks(10))
+        .append('text')
+        .attr('class', 'axis-label')
+        .attr('x', -height / 2)
+        .attr('y', -40)
+        .attr('transform', 'rotate(-90)')
+        .attr('fill', 'black')
+        .style('text-anchor', 'middle')
+        .text('Typhoon Count');
+    }
+
+    d3.select('#sort-original').on('click', () => updateChart('original'));
+    d3.select('#sort-ascending').on('click', () => updateChart('ascending'));
+    d3.select('#sort-descending').on('click', () => updateChart('descending'));
+
+    updateChart();
+  }).catch(function(error) {
+    console.error('Error loading data:', error);
+  });
+</script>
+
+
+
+
+</body>
+</html>
